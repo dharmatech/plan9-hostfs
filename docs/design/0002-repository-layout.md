@@ -585,11 +585,30 @@ accepted and implemented, Design 0001 must be revised as follows:
 Design 0001 remains a draft and must not be implemented against paths known to
 be temporary.
 
-## Remaining verification items
+## Implementation verification
 
-1. Confirm the full tracked move inventory immediately before migration.
-2. Verify shell and QEMU quoting when the project path contains spaces.
-3. Confirm Git rename detection across the large directory move.
-4. Re-run the default and mini boot baselines after migration.
-5. Treat any pre-layout annotated tag as a separate future decision; no tag is
-   part of this milestone.
+The migration implementation passed the following checks:
+
+- the staged project root contains only `.gitignore`, `LICENSE`, `NOTICE`,
+  `README.md`, `docs/`, `host/`, and `root-fs/`;
+- Git recognized 19,039 exact moves at 100 percent similarity, preserving file
+  history across the large directory move;
+- `host/qemu` passes shell syntax validation, rejects unknown arguments, and
+  resolves the project root correctly when invoked by absolute path or through
+  a path containing spaces;
+- the relocated `u9fs` build completes successfully;
+- the default HostFS boot reaches rio from `host/qemu`, with `root-fs/` serving
+  as both the TFTP root and the `u9fs` root;
+- the default guest exposes expected Plan 9 paths including `/sys`, `/amd64`,
+  `/cfg`, and `/LICENSE.gpl`;
+- project-only paths including `/.git`, `/docs`, `/host`, and `/README.md` are
+  absent from the default guest namespace;
+- `/README`, the Plan 9 distribution README, remains present in the default
+  guest namespace;
+- mini mode reaches rio from the unchanged `root-fs/boot/mini.raw` image; and
+- the mini source manifest no longer includes the host-facing `README.md`.
+
+The default and mini post-migration results match their pre-migration boot
+baselines except for the intended default guest-root boundary. No annotated
+pre-layout tag is part of this milestone; creating one remains a separate
+future decision.

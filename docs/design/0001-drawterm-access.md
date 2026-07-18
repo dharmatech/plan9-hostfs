@@ -12,11 +12,11 @@ single-identity configuration that intentionally uses the compatibility
 fallback in the 9front drawterm client instead of running an authentication
 server.
 
-The existing `./boot/qemu` behavior remains the default. Standalone drawterm
+The existing `./host/qemu` behavior remains the default. Standalone drawterm
 access is selected explicitly:
 
 ```sh
-./boot/qemu -drawterm standalone
+./host/qemu -drawterm standalone
 ```
 
 The launcher creates and reuses private NVRAM state outside the repository,
@@ -29,23 +29,24 @@ items that still require an end-to-end prototype.
 
 ## Context
 
-The current `boot/qemu` launcher:
+The current `host/qemu` launcher:
 
 - builds `u9fs`;
-- exports the repository root through `u9fs -a none -u $USER`;
-- boots `boot/pxeboot.raw` with snapshot behavior;
+- exports `root-fs/` through `u9fs -a none -u $USER`;
+- boots `root-fs/boot/pxeboot.raw` with snapshot behavior;
 - gives the guest access to the checkout over QEMU user networking; and
 - attaches the QEMU serial console to the invoking terminal.
 
 It does not forward a CPU or authentication port to the host. Its normal boot
-path uses the terminal kernel at `amd64/9k10`.
+path uses the terminal kernel at `root-fs/amd64/9k10`, visible to the guest as
+`/amd64/9k10`.
 
 The desired client is the 9front drawterm executable running on Windows. The
 server remains Russ Cox's legacy Plan 9 environment running under QEMU in WSL.
 
 ## Goals
 
-1. Preserve the behavior of `./boot/qemu` when no drawterm option is present.
+1. Preserve the behavior of `./host/qemu` when no drawterm option is present.
 2. Add an explicit standalone drawterm mode using the legacy CPU protocol.
 3. Bind host forwarding to `127.0.0.1` only.
 4. Forward only the port required by the selected profile.
@@ -71,13 +72,13 @@ The first milestone does not provide:
 
 ### CPU-server boot path
 
-The repository already contains `amd64/9k10cpu`. Its source configuration,
-`sys/src/9k/k10/k10cpu`, specifies `boot cpu`, includes TCP boot support, and
-sets `cpuserver = 1`.
+The repository already contains `root-fs/amd64/9k10cpu`. Its source
+configuration, `root-fs/sys/src/9k/k10/k10cpu`, specifies `boot cpu`, includes
+TCP boot support, and sets `cpuserver = 1`.
 
-During CPU-server startup, `rc/bin/cpurc` starts the TCP service listener with
-`aux/listen -q tcp`. The normal CPU service at
-`rc/bin/service/tcp17010` contains:
+During CPU-server startup, `root-fs/rc/bin/cpurc` starts the TCP service
+listener with `aux/listen -q tcp`. The normal CPU service at
+`root-fs/rc/bin/service/tcp17010` contains:
 
 ```rc
 #!/bin/cpu -R
@@ -85,7 +86,7 @@ During CPU-server startup, `rc/bin/cpurc` starts the TCP service listener with
 
 This is the service the standalone profile should expose.
 
-The special embedded root under `sys/src/9k/k10/root` contains a different
+The special embedded root under `root-fs/sys/src/9k/k10/root` contains a different
 `tcp17010` service:
 
 ```rc
@@ -130,14 +131,14 @@ a confirmed behavior.
 
 ### Authentication-server support already present
 
-`rc/bin/cpurc` contains commented guidance for running `auth/keyfs` and moving
+`root-fs/rc/bin/cpurc` contains commented guidance for running `auth/keyfs` and moving
 `authsrv.tcp567` into service as `tcp567`. This provides a plausible basis for
 a future full authentication profile, but enabling it requires persistent key
 state and a more extensive provisioning lifecycle.
 
 ### HostFS identity boundary
 
-The current launcher starts `u9fs` with:
+The launcher starts `u9fs` from `root-fs/boot` with:
 
 ```sh
 u9fs -a none -u "$USER" ..
@@ -161,13 +162,13 @@ The intended interface is:
 
 ```sh
 # Existing terminal behavior
-./boot/qemu
+./host/qemu
 
 # First milestone
-./boot/qemu -drawterm standalone
+./host/qemu -drawterm standalone
 
 # Reserved as a possible future interface; not implemented yet
-./boot/qemu -drawterm authsrv
+./host/qemu -drawterm authsrv
 ```
 
 The unimplemented `authsrv` value must not be accepted silently. Unknown or
@@ -192,7 +193,7 @@ an accidental boot path.
 
 The standalone profile uses:
 
-- the `amd64/9k10cpu` CPU-server kernel;
+- the `root-fs/amd64/9k10cpu` CPU-server kernel;
 - the normal `cpu -R` service on guest TCP 17010;
 - `authid` `glenda`;
 - `authdom` `plan9-hostfs`;
@@ -291,7 +292,7 @@ forward 567, 564, 17019, or any of the auxiliary ports used by unrelated
 ### First boot
 
 ```sh
-./boot/qemu -drawterm standalone
+./host/qemu -drawterm standalone
 ```
 
 The user completes the Plan 9 NVRAM prompts at the QEMU serial console and
@@ -336,7 +337,7 @@ confirmed during acceptance testing.
 
 The following are intentionally unresolved in this draft:
 
-1. Determine the cleanest way to select `amd64/9k10cpu` without changing the
+1. Determine the cleanest way to select `root-fs/amd64/9k10cpu` without changing the
    default PXE boot behavior.
 2. Choose a QEMU disk/controller arrangement that gives the NVRAM disk a stable
    Plan 9 device name.
@@ -356,9 +357,9 @@ The following are intentionally unresolved in this draft:
 
 The standalone milestone is complete when all of the following hold:
 
-- `./boot/qemu` behaves as it did before the change.
+- `./host/qemu` behaves as it did before the change.
 - The existing image-selection options have documented, tested behavior.
-- `./boot/qemu -drawterm standalone` creates private state outside the
+- `./host/qemu -drawterm standalone` creates private state outside the
   checkout on first use.
 - First use initializes NVRAM interactively without embedding a default
   password.
