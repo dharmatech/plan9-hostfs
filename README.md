@@ -85,8 +85,9 @@ Keep QEMU running and connect from Windows PowerShell with the 9front drawterm
 client:
 
 ```powershell
+$drawterm = 'C:\path\to\drawterm.exe'
 $env:PASS = '<the auth password chosen during first boot>'
-& 'C:\Users\dharm\src\drawterm\build\msvc\drawterm.exe' `
+& $drawterm `
     -O `
     -h 'tcp!127.0.0.1!17010' `
     -a 'tcp!127.0.0.1!567' `
@@ -104,7 +105,7 @@ The Windows client sends its current directory to the CPU server. Plan 9 may
 briefly report a message such as:
 
 ```text
-cpu: failed to chdir to 'C:\Users\dharm'
+cpu: failed to chdir to 'C:\Users\you'
 ```
 
 This is cosmetic. The session falls back to `/usr/glenda` and starts Rio.
