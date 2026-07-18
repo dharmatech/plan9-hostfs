@@ -6,4 +6,4 @@ root-fs/usr/glenda/tmp
 root-fs/sys/log
 root-fs/sys/src/cmd/unix/u9fs/u9fs
 
-archive
+/archive/
