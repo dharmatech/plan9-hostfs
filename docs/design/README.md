@@ -14,6 +14,7 @@ This directory records architectural decisions for Plan 9 HostFS.
 | --- | --- | --- |
 | [0001: Drawterm access](0001-drawterm-access.md) | Draft | Opt-in standalone CPU service, persistent private NVRAM, and loopback-only drawterm forwarding. |
 | [0002: Repository layout](0002-repository-layout.md) | Accepted | Separate host tooling and project metadata from the Plan 9 root exported through u9fs and TFTP. |
+| [0003: HostFS runtime state](0003-hostfs-runtime-state.md) | Accepted | Keep mutable guest runtime logs out of tracked source while preserving the live HostFS model. |
 
 ## Process
 

@@ -3,6 +3,8 @@
 - Status: Draft
 - Date: 2026-07-17
 - Branch: `drawterm-access`
+- Depends on: Design 0002
+- Related: Design 0003
 
 ## Summary
 
@@ -24,8 +26,8 @@ forwards only TCP 17010 on the loopback interface, and boots the existing CPU
 kernel and authenticated CPU service. A future `authsrv` profile may add a real
 authentication server, but it is not part of this milestone.
 
-This document distinguishes decisions from source-supported expectations and
-items that still require an end-to-end prototype.
+This document distinguishes decisions, source-supported expectations, behavior
+verified by the end-to-end prototype, and checks that remain for implementation.
 
 ## Context
 
@@ -72,9 +74,15 @@ The first milestone does not provide:
 
 ### CPU-server boot path
 
-The repository already contains `root-fs/amd64/9k10cpu`. Its source
-configuration, `root-fs/sys/src/9k/k10/k10cpu`, specifies `boot cpu`, includes
-TCP boot support, and sets `cpuserver = 1`.
+The repository already contains `root-fs/amd64/9k10cpuf`. Its source
+configuration, `root-fs/sys/src/9k/k10/k10cpuf`, specifies `boot cpu`, includes
+TCP and local boot support, sets `cpuserver = 1`, and includes the storage
+drivers needed to expose an attached NVRAM disk.
+
+The similarly named `root-fs/amd64/9k10cpu` is not suitable for this profile.
+Its kernel configuration omits block-storage support, so an additional QEMU
+disk cannot provide persistent NVRAM. The prototype therefore selected
+`9k10cpuf`; the terminal-mode default remains `9k10`.
 
 During CPU-server startup, `root-fs/rc/bin/cpurc` starts the TCP service
 listener with `aux/listen -q tcp`. The normal CPU service at
@@ -125,9 +133,23 @@ interactive data includes an authentication identity, authentication domain,
 authentication password, and secstore password.
 
 The source therefore supports a first-run flow in which a blank disk is
-initialized and boot continues. Whether the selected QEMU disk attachment and
-this kernel complete that flow without a reboot remains a prototype test, not
-a confirmed behavior.
+initialized and boot continues. The prototype verified this flow with a 1 MiB
+raw image attached as the second IDE disk and selected explicitly as:
+
+```text
+nvram=#S/sdC1/data
+```
+
+A first-use PXE configuration with `factotumopts=-k` prompted for and wrote the
+credentials. A normal reuse configuration omitted `factotumopts`; the next
+cold boot reused the record without prompting. No reboot between prompting and
+the first CPU-service startup was required.
+
+The inherited source tree also contains a 512-byte file named
+`root-fs/sys/src/9k/root/nvram`, which may be embedded by kernel configurations
+that use that root. Standalone mode does not inspect, modify, or depend on that
+opaque inherited file. Its explicit `nvram` setting selects the private
+external disk instead.
 
 ### Authentication-server support already present
 
@@ -184,16 +206,17 @@ With no `-drawterm` option, the launcher must continue to use the existing
 terminal kernel, network export, PXE disk, serial console, and lack of host
 forwarding.
 
-Existing `-pxenew` and `-mini` behavior must not regress. Compatibility between
-those image-selection options and standalone mode will be made explicit during
-implementation; unsupported combinations must fail clearly rather than select
-an accidental boot path.
+Existing `-pxenew` and `-mini` behavior must not regress. Standalone mode with
+`-mini` is unsupported because the embedded mini filesystem is not the HostFS
+CPU-server environment; the launcher must reject that combination clearly.
+Standalone mode with `-pxenew` remains an implementation check because the new
+PXE image is absent from this checkout.
 
 ### Standalone authentication model
 
 The standalone profile uses:
 
-- the `root-fs/amd64/9k10cpu` CPU-server kernel;
+- the `root-fs/amd64/9k10cpuf` CPU-server kernel;
 - the normal `cpu -R` service on guest TCP 17010;
 - `authid` `glenda`;
 - `authdom` `plan9-hostfs`;
@@ -243,8 +266,16 @@ secstore password: chosen by the user as appropriate
 ```
 
 No initialized NVRAM image or shared default password is distributed. A
-separate provisioning command will be added only if the prototype shows that
-the source-supported first-boot flow is unreliable or requires a reboot.
+separate user-facing provisioning command is unnecessary: the prototype showed
+that the source-supported first-boot flow is reliable and continues directly
+to CPU-server startup.
+
+Internally, the launcher needs two PXE configurations. If it created the NVRAM
+image for this invocation, it boots with `factotumopts=-k` so Plan 9 owns the
+interactive initialization. If the image already existed, it boots without
+`factotumopts=-k`. Both configurations set `nvram=#S/sdC1/data`. Existence is
+the lifecycle signal; the launcher must never replace or truncate an existing
+image to force provisioning again.
 
 ### QEMU disk snapshot behavior
 
@@ -259,9 +290,21 @@ replace the global option with equivalent per-drive behavior:
 -drive file="$pxe",format=raw,snapshot=on
 ```
 
-The standalone NVRAM drive must be writable with snapshot behavior disabled.
-Its exact controller, QEMU device declaration, image size, and stable Plan 9
-device name remain prototype decisions.
+The prototype verified the following arrangement:
+
+- the PXE boot image is IDE disk index 0 with `snapshot=on`;
+- the private NVRAM image is IDE disk index 1 with `snapshot=off`;
+- the NVRAM image is a 1 MiB raw file;
+- the state directory is mode 0700 and the image is mode 0600; and
+- `9k10cpuf` exposes the image consistently as `#S/sdC1/data`.
+
+The implementation must express snapshot behavior per drive rather than use
+QEMU's global `-snapshot`. The private image remains writable and persistent,
+while the disposable PXE-disk writes retain the existing behavior.
+
+The prototype also showed that starting the CPU service modifies the tracked
+placeholder `root-fs/sys/log/listen`. Design 0003 defines the separate runtime
+log boundary required for normal boots to leave the working tree clean.
 
 ### Minimal loopback forwarding
 
@@ -316,8 +359,23 @@ C:\Users\dharm\src\drawterm\build\msvc\drawterm.exe `
 `rcpu`. The explicit authentication address documents where the client's first
 ticket attempt goes; standalone mode deliberately has no listener or QEMU
 forward on that port, so the selected client must take its local compatibility
-path. The exact Windows quoting and observed fallback failure mode will be
-confirmed during acceptance testing.
+path. This exact command was verified with the Windows 9front drawterm build.
+
+On first provisioning, there can be a noticeable pause after entering the
+secstore password while Plan 9 writes and processes the authentication record.
+The user should wait for the `gnot#` prompt before connecting drawterm.
+
+The Windows client sends its current Windows directory to the CPU server. The
+Plan 9 server cannot resolve a path such as `C:\Users\dharm`, so it briefly
+prints a message like:
+
+```text
+cpu: failed to chdir to 'C:\Users\dharm'
+```
+
+It then falls back to `/usr/glenda` and starts the requested command. This is a
+cosmetic behavior of the selected client/server combination, not a failed
+connection, and does not require a custom drawterm build.
 
 ## Security properties and limitations
 
@@ -333,25 +391,43 @@ confirmed during acceptance testing.
 7. Plan 9 identities do not form distinct Unix security principals through the
    current `u9fs -a none -u "$USER"` export.
 
-## Prototype verification items
+## Prototype verification results
 
-The following are intentionally unresolved in this draft:
+The disposable end-to-end prototype established the following:
 
-1. Determine the cleanest way to select `root-fs/amd64/9k10cpu` without changing the
-   default PXE boot behavior.
-2. Choose a QEMU disk/controller arrangement that gives the NVRAM disk a stable
-   Plan 9 device name.
-3. Choose the smallest robust NVRAM image size and set the correct `nvram`
-   value for the guest.
-4. Confirm that first boot prompts, writes NVRAM, and continues without a
-   reboot.
-5. Confirm that a second boot reuses NVRAM without prompting.
-6. Confirm that the Windows 9front drawterm client reaches the intended
-   fallback and opens `rio` as `glenda`.
-7. Confirm that the QEMU host listener is bound only to `127.0.0.1:17010`.
-8. Confirm that replacing global `-snapshot` with per-drive `snapshot=on`
-   preserves the existing PXE-disk behavior.
-9. Define and test valid combinations with `-pxenew` and `-mini`.
+1. `9k10cpuf` boots as a CPU server while retaining access to the HostFS root
+   and an attached block device.
+2. A blank 1 MiB raw image attached as IDE disk index 1 is stable at
+   `#S/sdC1/data`.
+3. First boot with `factotumopts=-k` prompts for `glenda`, domain
+   `plan9-hostfs`, an authentication password, and a secstore password, writes
+   the record, and continues to the `gnot#` prompt without a reboot.
+4. A cold restart without `factotumopts=-k` reuses the NVRAM record without
+   credential prompts.
+5. Only host TCP `127.0.0.1:17010` is forwarded. Neither the guest nor QEMU
+   provides a listener on TCP 567.
+6. The Windows 9front drawterm client connects with `-O`, reaches its local
+   ticket fallback after the explicit authentication address fails, opens Rio
+   as `glenda`, and starts in `/usr/glenda` on `gnot`.
+7. `/README`, `/amd64`, `/cfg`, and `/sys` remain the WSL-host-backed tree in
+   the drawterm session.
+8. Two drawterm clients can connect simultaneously. They receive distinct
+   processes, and Rio and Acme run independently in both sessions.
+9. Closing both clients and QEMU, then starting a new cold QEMU process, does
+   not invalidate the saved credentials.
+10. The prototype's private NVRAM image can be removed without modifying any
+    credential-bearing repository file.
+
+The following checks remain for the actual launcher implementation:
+
+1. Confirm that `./host/qemu` remains behaviorally compatible at its existing
+   user interface.
+2. Confirm that per-drive PXE snapshot behavior matches the original global
+   `-snapshot` behavior.
+3. Reject `-drawterm standalone -mini` clearly.
+4. Verify `-drawterm standalone -pxenew` if a new PXE image becomes available;
+   until then, fail clearly because that image is absent.
+5. Implement Design 0003 so CPU-service logs do not dirty tracked files.
 
 ## Acceptance criteria
 
@@ -367,11 +443,17 @@ The standalone milestone is complete when all of the following hold:
 - QEMU forwards only `127.0.0.1:17010` for the standalone profile.
 - No authentication port is forwarded.
 - Windows 9front drawterm connects with `-O` as `glenda` and starts `rio`.
+- Two simultaneous drawterm sessions can run independent Rio and Acme
+  processes.
 - The NVRAM file remains writable and persistent while the PXE disk retains
   snapshot behavior.
-- Initialization and normal use leave the Git working tree clean.
+- The Windows-current-directory warning is documented as cosmetic, and the
+  session falls back to `/usr/glenda`.
+- Initialization and normal use leave the Git working tree clean, including
+  service logs covered by Design 0003.
 - Passwords and credential-bearing state do not appear in Git, logs, or process
   arguments.
+- Removing disposable profile state does not require changing tracked files.
 
 ## Alternatives considered
 
