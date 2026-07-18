@@ -81,8 +81,19 @@ Set `PLAN9_HOSTFS_STATE` to an absolute directory to override the
 the 1 MiB NVRAM image with mode 0600. Subsequent boots reuse the initialized
 image without prompting for credentials.
 
-Keep QEMU running and connect from Windows PowerShell with the 9front drawterm
-client:
+Keep QEMU running and connect from Linux with the 9front drawterm client:
+
+```sh
+drawterm=/path/to/drawterm
+PASS='<the auth password chosen during first boot>' "$drawterm" \
+    -O \
+    -h 'tcp!127.0.0.1!17010' \
+    -a 'tcp!127.0.0.1!567' \
+    -u glenda \
+    -c rio
+```
+
+On Windows, connect from PowerShell:
 
 ```powershell
 $drawterm = 'C:\path\to\drawterm.exe'
