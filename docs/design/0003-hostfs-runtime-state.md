@@ -241,6 +241,31 @@ following:
   the configured external profile-state root; and
 - NVRAM and other credential-bearing state remain outside `root-fs/`.
 
+## Implementation verification
+
+The runtime-state implementation passed both isolated and real-guest checks:
+
+- the versioned manifest contains all 32 imported paths and their original
+  modes;
+- isolated tests created all manifest entries, preserved an existing file's
+  content and mode, rejected parent traversal, and rejected a symbolic-link
+  log root without writing through it;
+- a stubbed `host/qemu` integration run invoked preparation before the build
+  and QEMU steps;
+- the default real QEMU profile booted `/amd64/9k10`, reached Rio, and exposed
+  `/sys/log/listen` with mode 0755 and `/sys/log/httpd` with mode 0755;
+- the real standalone CPU profile appended to `/sys/log/listen` while Git
+  reported only the intended source changes;
+- a cold standalone restart increased the listener log from 71 to 142 bytes,
+  demonstrating retention without truncation; and
+- generated files, including a pre-existing non-manifest `dns` log, remained
+  ignored without being deleted or treated as an error.
+
+The imported nonempty `mail`, `runq`, and `smtp` records remain available in
+the parent Git history but are not seeded into new runtime logs. NVRAM is
+created and maintained only in the external profile-state root specified by
+Design 0001.
+
 ## Alternatives considered
 
 ### Keep tracking empty log files

@@ -1,6 +1,6 @@
 # Design 0001: Drawterm access
 
-- Status: Draft
+- Status: Accepted
 - Date: 2026-07-17
 - Branch: `drawterm-access`
 - Depends on: Design 0002
@@ -418,16 +418,19 @@ The disposable end-to-end prototype established the following:
 10. The prototype's private NVRAM image can be removed without modifying any
     credential-bearing repository file.
 
-The following checks remain for the actual launcher implementation:
+The launcher implementation completed the remaining checks:
 
-1. Confirm that `./host/qemu` remains behaviorally compatible at its existing
-   user interface.
-2. Confirm that per-drive PXE snapshot behavior matches the original global
-   `-snapshot` behavior.
-3. Reject `-drawterm standalone -mini` clearly.
-4. Verify `-drawterm standalone -pxenew` if a new PXE image becomes available;
-   until then, fail clearly because that image is absent.
-5. Implement Design 0003 so CPU-service logs do not dirty tracked files.
+1. The default `./host/qemu` interface still boots the terminal kernel and
+   HostFS root with its original global snapshot behavior.
+2. Standalone mode uses per-drive snapshot policy: the PXE disk is disposable
+   and NVRAM is writable and persistent.
+3. `-drawterm standalone -mini` is rejected clearly.
+4. `-pxenew` fails clearly while `pxeboot.raw.new` is absent; standalone mode
+   uses it if supplied rather than silently selecting another image.
+5. Design 0003 is implemented, so CPU-service logs are ignored generated state
+   rather than tracked source modifications.
+6. Invalid profiles, duplicate options, relative state paths, unsafe state
+   shapes, wrong-sized NVRAM, and concurrent state use fail before QEMU starts.
 
 ## Acceptance criteria
 
@@ -454,6 +457,45 @@ The standalone milestone is complete when all of the following hold:
 - Passwords and credential-bearing state do not appear in Git, logs, or process
   arguments.
 - Removing disposable profile state does not require changing tracked files.
+
+## Implementation verification
+
+The implemented `./host/qemu -drawterm standalone` profile passed the following
+checks on 2026-07-17 under QEMU in WSL:
+
+- isolated launcher tests preserved the original no-option QEMU argument shape
+  and verified the standalone two-disk, per-drive snapshot declarations;
+- the launcher created the default state directories with mode 0700 and a
+  1 MiB NVRAM image with mode 0600 without placing state in the checkout;
+- the first real boot selected the provisioning PXE template, loaded
+  `9k10cpuf`, prompted for `glenda` and `plan9-hostfs`, and reached `gnot#`;
+- the active single-instance lock existed while QEMU ran and was removed after
+  normal QEMU shutdown;
+- Windows loopback TCP 17010 was reachable while TCP 567 remained closed;
+- the Windows 9front drawterm client connected with the documented `-O`, `-h`,
+  and `-a` values and started Rio as `glenda` on `gnot` in `/usr/glenda`;
+- the drawterm guest saw `/README`, `/amd64`, and `/sys/log/listen` through the
+  live WSL-backed HostFS tree;
+- two drawterm clients connected concurrently as distinct CPU processes;
+- after shutdown, the NVRAM image retained its size and mode and the repository
+  contained no runtime-log changes;
+- a cold QEMU restart selected the reuse PXE template, reached `gnot#` without
+  credential prompts, restored TCP 17010, and accepted drawterm again; and
+- `/sys/log/listen` grew from 71 to 142 bytes across the cold restart, proving
+  the ignored runtime log was retained and appended rather than truncated.
+
+The default terminal profile was also booted after Design 0003 implementation.
+It reached Rio through `/amd64/9k10`, exposed generated `/sys/log` files with
+their expected Plan 9 modes, and left only the ignored runtime-log subtree.
+
+The optional `pxeboot.raw.new` image remains absent, so its kernel boot cannot
+be exercised. Argument and preflight tests confirm that `-pxenew` selects that
+exact path and fails before state creation while it is absent.
+
+The earlier disposable prototype established independent Acme sessions in two
+simultaneous drawterm clients. The production launcher preserves the same CPU
+kernel, service, network, and authentication path; concurrent production Rio
+sessions were reconfirmed during implementation acceptance.
 
 ## Alternatives considered
 

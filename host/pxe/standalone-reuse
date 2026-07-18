@@ -1,0 +1,20 @@
+[menu]
+menuitem=1440x900, Plan 9 HostFS drawterm
+
+[1440x900]
+vgasize=1440x900x32
+
+[common]
+bootfile=ether0!/amd64/9k10cpuf
+fs=10.0.2.1
+auth=10.0.2.1
+sysname=gnot
+*nobiosload=1
+partition=new
+nvram=#S/sdC1/data
+user=glenda
+console=0
+mouseport=ps2intellimouse
+monitor=vesa
+*nomp=1
+nobootprompt=tcp

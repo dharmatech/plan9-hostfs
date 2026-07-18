@@ -1,31 +1,188 @@
 #!/bin/sh
 
 set -e
+
+fail()
+{
+	echo "host/qemu: $*" >&2
+	exit 1
+}
+
+lock_dir=
+lock_owned=no
+temporary_nvram=
+cleanup()
+{
+	if [ -n "$temporary_nvram" ]; then
+		rm -f "$temporary_nvram"
+		temporary_nvram=
+	fi
+	if [ "$lock_owned" = yes ]; then
+		rm -f "$lock_dir/pid"
+		rmdir "$lock_dir" 2>/dev/null || :
+		lock_owned=no
+		lock_dir=
+	fi
+}
+trap cleanup 0
+trap 'exit 1' HUP INT QUIT TERM
+
+ensure_private_dir()
+{
+	directory=$1
+	label=$2
+	if [ -L "$directory" ]; then
+		fail "$label must not be a symbolic link: $directory"
+	elif [ -e "$directory" ]; then
+		[ -d "$directory" ] || fail "$label is not a directory: $directory"
+	else
+		(umask 077; mkdir -p "$directory") ||
+			fail "cannot create $label: $directory"
+	fi
+	chmod 0700 "$directory" || fail "cannot protect $label: $directory"
+}
+
+prepare_standalone()
+{
+	if [ "${PLAN9_HOSTFS_STATE+x}" = x ]; then
+		[ -n "$PLAN9_HOSTFS_STATE" ] ||
+			fail 'PLAN9_HOSTFS_STATE must not be empty'
+		state_root=$PLAN9_HOSTFS_STATE
+	elif [ -n "${XDG_STATE_HOME:-}" ]; then
+		state_root=$XDG_STATE_HOME/plan9-hostfs
+	else
+		[ -n "${HOME:-}" ] || fail 'HOME is not set'
+		state_root=$HOME/.local/state/plan9-hostfs
+	fi
+
+	case "$state_root" in
+	/*)
+		;;
+	*)
+		fail "standalone state path must be absolute: $state_root"
+		;;
+	esac
+	case "$state_root" in
+	*,*)
+		fail "standalone state path must not contain a comma: $state_root"
+		;;
+	esac
+
+	ensure_private_dir "$state_root" 'state root'
+	state_dir=$state_root/standalone
+	ensure_private_dir "$state_dir" 'standalone state directory'
+
+	lock_dir=$state_dir/qemu.lock
+	if ! (umask 077; mkdir "$lock_dir"); then
+		fail "standalone state is already in use; if no QEMU process is running, remove its pid file and then: $lock_dir"
+	fi
+	lock_owned=yes
+	printf '%s\n' "$$" > "$lock_dir/pid" || fail "cannot record lock owner: $lock_dir"
+
+	nvram=$state_dir/nvram.img
+	provision=no
+	if [ -L "$nvram" ]; then
+		fail "NVRAM image must not be a symbolic link: $nvram"
+	elif [ -e "$nvram" ]; then
+		[ -f "$nvram" ] || fail "NVRAM image is not a regular file: $nvram"
+		nvram_size=$(wc -c < "$nvram")
+		[ "$nvram_size" = 1048576 ] ||
+			fail "NVRAM image has unexpected size $nvram_size; expected 1048576 bytes: $nvram"
+	else
+		provision=yes
+		temporary_nvram=$state_dir/.nvram.img.new.$$
+		[ ! -e "$temporary_nvram" ] ||
+			fail "temporary NVRAM path already exists: $temporary_nvram"
+		(umask 077; dd if=/dev/zero of="$temporary_nvram" bs=1024 count=1024) \
+			>/dev/null 2>&1 || fail "cannot create NVRAM image: $nvram"
+		chmod 0600 "$temporary_nvram" || fail "cannot protect NVRAM image: $nvram"
+		mv "$temporary_nvram" "$nvram" || fail "cannot install NVRAM image: $nvram"
+		temporary_nvram=
+	fi
+	chmod 0600 "$nvram" || fail "cannot protect NVRAM image: $nvram"
+
+	tftp_root=$state_dir/tftp
+	ensure_private_dir "$tftp_root" 'standalone TFTP directory'
+	ensure_private_dir "$tftp_root/cfg" 'standalone TFTP cfg directory'
+	ensure_private_dir "$tftp_root/cfg/pxe" 'standalone TFTP PXE directory'
+	ensure_private_dir "$tftp_root/amd64" 'standalone TFTP kernel directory'
+
+	if [ "$provision" = yes ]; then
+		pxe_template=$script_dir/pxe/standalone-provision
+	else
+		pxe_template=$script_dir/pxe/standalone-reuse
+	fi
+	[ -f "$pxe_template" ] || fail "PXE template is missing: $pxe_template"
+	[ -f "$root_fs/amd64/9k10cpuf" ] ||
+		fail "CPU kernel is missing: $root_fs/amd64/9k10cpuf"
+	cp "$pxe_template" "$tftp_root/cfg/pxe/525400123456" ||
+		fail 'cannot install standalone PXE configuration'
+	cp "$root_fs/amd64/9k10cpuf" "$tftp_root/amd64/9k10cpuf" ||
+		fail 'cannot install standalone CPU kernel'
+
+	if [ "$provision" = yes ]; then
+		echo '# standalone drawterm: first boot will initialize private NVRAM' >&2
+		echo '# use authid glenda and authdom plan9-hostfs at the Plan 9 prompts' >&2
+	else
+		echo '# standalone drawterm: reusing private NVRAM' >&2
+	fi
+	echo '# CPU forwarding: 127.0.0.1:17010 -> guest TCP 17010' >&2
+}
+
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 project_root=$(CDPATH= cd "$script_dir/.." && pwd)
 root_fs=$project_root/root-fs
 runtime_log_manifest=$script_dir/runtime-log-files
 
 pxe=pxeboot.raw
-case "$1" in
--pxenew)
-	pxe=pxeboot.raw.new
+image=pxe
+drawterm=
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	-pxenew)
+		[ "$image" = pxe ] || fail 'only one image-selection option may be used'
+		pxe=pxeboot.raw.new
+		image=pxenew
+		;;
+	-mini)
+		[ "$image" = pxe ] || fail 'only one image-selection option may be used'
+		pxe=mini.raw
+		image=mini
+		;;
+	-drawterm)
+		[ -z "$drawterm" ] || fail '-drawterm may be specified only once'
+		shift
+		[ "$#" -gt 0 ] || fail '-drawterm requires a profile'
+		drawterm=$1
+		case "$drawterm" in
+		standalone)
+			;;
+		authsrv)
+			fail 'drawterm authsrv is not implemented'
+			;;
+		*)
+			fail "unknown drawterm profile: $drawterm"
+			;;
+		esac
+		;;
+	*)
+		echo 'usage: host/qemu [-pxenew|-mini] [-drawterm standalone]' >&2
+		exit 1
+		;;
+	esac
 	shift
-	;;
--mini)
-	pxe=mini.raw
-	shift
-esac
+done
 
-case "$#" in
-0)
-	;;
-*)
-	echo 'usage: host/qemu [-pxenew|-mini]' >&2
-	exit 1
-esac
+if [ "$drawterm" = standalone ] && [ "$image" = mini ]; then
+	fail 'drawterm standalone is not compatible with -mini'
+fi
+
+[ -f "$root_fs/boot/$pxe" ] || fail "boot image is missing: $root_fs/boot/$pxe"
 
 "$script_dir/prepare-runtime-logs" "$runtime_log_manifest" "$root_fs"
+if [ "$drawterm" = standalone ]; then
+	prepare_standalone
+fi
 cd "$root_fs/boot"
 
 echo '# building u9fs' >&2
@@ -35,7 +192,17 @@ u9fs="guestfwd=tcp:10.0.2.1:564-cmd:../sys/src/cmd/unix/u9fs/u9fs -a none -u $US
 tftp='tftp=..'
 mac=mac=52:54:00:12:34:56
 
-qemu-system-x86_64 -m 1G -smp 1 -serial stdio \
-	-drive "file=$pxe,format=raw" -snapshot \
-	-device "virtio-net-pci,netdev=net0,$mac" \
-	-netdev "user,id=net0,$u9fs,$tftp"
+if [ "$drawterm" = standalone ]; then
+	standalone_tftp=tftp=$tftp_root
+	cpu_fwd='hostfwd=tcp:127.0.0.1:17010-:17010'
+	qemu-system-x86_64 -m 1G -smp 1 -serial stdio \
+		-drive "file=$pxe,format=raw,if=ide,index=0,snapshot=on" \
+		-drive "file=$nvram,format=raw,if=ide,index=1,snapshot=off" \
+		-device "virtio-net-pci,netdev=net0,$mac" \
+		-netdev "user,id=net0,$u9fs,$standalone_tftp,$cpu_fwd"
+else
+	qemu-system-x86_64 -m 1G -smp 1 -serial stdio \
+		-drive "file=$pxe,format=raw" -snapshot \
+		-device "virtio-net-pci,netdev=net0,$mac" \
+		-netdev "user,id=net0,$u9fs,$tftp"
+fi

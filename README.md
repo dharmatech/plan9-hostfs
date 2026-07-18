@@ -48,6 +48,91 @@ At the current startup menus:
 The launcher builds `root-fs/sys/src/cmd/unix/u9fs/u9fs` automatically.
 Generated build and runtime files remain ignored by Git.
 
+## Drawterm access
+
+Standalone drawterm mode boots the legacy CPU service with one authenticated
+Plan 9 identity:
+
+```sh
+./host/qemu -drawterm standalone
+```
+
+On the first run, choose menu option 1 and enter:
+
+```text
+authid: glenda
+authdom: plan9-hostfs
+auth password: a private password of your choice
+secstore password: the same private password
+```
+
+The final password values are not displayed. After entering the secstore
+password, initialization can pause for a while. Wait for the `gnot#` prompt
+before starting drawterm.
+
+The launcher stores the private NVRAM image outside the checkout at:
+
+```text
+${XDG_STATE_HOME:-$HOME/.local/state}/plan9-hostfs/standalone/nvram.img
+```
+
+Set `PLAN9_HOSTFS_STATE` to an absolute directory to override the
+`plan9-hostfs` state root. State directories are protected with mode 0700 and
+the 1 MiB NVRAM image with mode 0600. Subsequent boots reuse the initialized
+image without prompting for credentials.
+
+Keep QEMU running and connect from Windows PowerShell with the 9front drawterm
+client:
+
+```powershell
+$env:PASS = '<the auth password chosen during first boot>'
+& 'C:\Users\dharm\src\drawterm\build\msvc\drawterm.exe' `
+    -O `
+    -h 'tcp!127.0.0.1!17010' `
+    -a 'tcp!127.0.0.1!567' `
+    -u glenda `
+    -c rio
+```
+
+`-O` selects the legacy CPU protocol. The explicit authentication address has
+no listener in standalone mode; the selected 9front client falls back to its
+local single-identity ticket path. QEMU forwards only host loopback TCP 17010.
+It does not forward an authentication port or expose the CPU service on the
+LAN.
+
+The Windows client sends its current directory to the CPU server. Plan 9 may
+briefly report a message such as:
+
+```text
+cpu: failed to chdir to 'C:\Users\dharm'
+```
+
+This is cosmetic. The session falls back to `/usr/glenda` and starts Rio.
+Multiple drawterm clients can connect to the same QEMU instance and run
+independent Rio and Acme sessions.
+
+Standalone mode is intentionally a single-identity local development profile,
+not a multi-user authentication server. Anyone with the password or NVRAM
+state should be treated as able to authenticate as `glenda`. Do not expose the
+CPU port beyond loopback.
+
+Only one standalone QEMU process may use a state directory at a time. The
+launcher records this with `standalone/qemu.lock` and removes the lock on a
+normal exit. If an abnormal termination leaves that directory behind, first
+confirm that no standalone QEMU process is running. Remove only
+`qemu.lock/pid`, then remove the empty `qemu.lock` directory named in the
+launcher's error message.
+
+If first-run provisioning is interrupted before NVRAM initialization
+completes, stop QEMU before changing state. Removing `standalone/nvram.img`
+discards the standalone credentials and makes the next launch provision a new
+image. Back up an initialized NVRAM image if losing those credentials would be
+inconvenient.
+
+Standalone mode is incompatible with `-mini`. The optional `-pxenew` image may
+be combined with it when that image is available; the current checkout does
+not include `pxeboot.raw.new`.
+
 ## Host filesystem model
 
 QEMU exports `root-fs/` through `u9fs`, and Plan 9 mounts its contents as `/`.
@@ -103,8 +188,8 @@ leave that individual operation incomplete.
 ## Design and development
 
 Architectural decisions and verified baselines are recorded in
-[`docs/design`](docs/design/README.md). Drawterm access is designed there but
-is not yet implemented.
+[`docs/design`](docs/design/README.md). Standalone drawterm access and the
+HostFS runtime-state boundary are implemented from those designs.
 
 ## Lineage and licensing
 
