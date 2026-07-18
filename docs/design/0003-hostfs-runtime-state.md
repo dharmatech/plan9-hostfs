@@ -129,35 +129,37 @@ Files whose sole purpose is mutable service logging will no longer be tracked
 beneath `root-fs/sys/log/`. The directory and its generated contents will be
 ignored by Git.
 
-The implementation will derive a complete initial manifest from the currently
-tracked placeholder inventory before untracking it. The manifest belongs in
-host project metadata, tentatively:
+The complete initial manifest is derived from the previously tracked
+placeholder inventory and lives in host project metadata:
 
 ```text
 host/runtime-log-files
 ```
 
-Each nonblank, non-comment line names one guest-root-relative regular file,
-for example:
+Each nonblank, non-comment line records the required mode and one
+guest-root-relative regular file, for example:
 
 ```text
-sys/log/listen
+0755 sys/log/listen
 ```
 
-The manifest is declarative; it contains no log data and no secrets. Its exact
-inventory initially includes all 32 currently tracked log names whose paths
-remain valid. The three imported nonempty logs contribute their names only;
-their historical records remain available from the parent Git history and are
-not copied into generated files.
+The manifest is declarative; it contains no log data and no secrets. Its
+inventory includes all 32 previously tracked names. It preserves the imported
+modes: 31 entries use mode 0755, while `timesync.d/.gitempty` uses mode 0644.
+The three imported nonempty logs contribute their names and modes only; their
+historical records remain available from the parent Git history and are not
+copied into generated files.
 
-The manifest's exact filename may change during implementation if a broader
-runtime-manifest format is justified, but the inventory must remain versioned
-and reviewable.
+The versioned helper `host/prepare-runtime-logs` consumes this manifest. Keeping
+preparation separate from QEMU argument construction makes path validation and
+idempotence independently testable while `host/qemu` remains the user-facing
+control point.
 
 ### Launcher preparation
 
-Before `u9fs` or QEMU starts, `host/qemu` will prepare the manifest entries
-beneath the resolved `root-fs/` directory.
+After validating its command-line options and before starting `u9fs` or QEMU,
+`host/qemu` invokes the helper to prepare the manifest entries beneath the
+resolved `root-fs/` directory.
 
 Preparation must:
 

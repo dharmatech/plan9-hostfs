@@ -1,0 +1,126 @@
+#!/bin/sh
+
+set -e
+
+fail()
+{
+	echo "prepare-runtime-logs: $*" >&2
+	exit 1
+}
+
+case "$#" in
+2)
+	manifest=$1
+	root_fs=$2
+	;;
+*)
+	echo 'usage: prepare-runtime-logs manifest root-fs' >&2
+	exit 1
+esac
+
+[ -f "$manifest" ] || fail "manifest is not a regular file: $manifest"
+[ -d "$root_fs" ] || fail "root filesystem is not a directory: $root_fs"
+
+runtime_log_root=$root_fs/sys/log
+
+if [ -L "$runtime_log_root" ]; then
+	fail "runtime log root must not be a symbolic link: $runtime_log_root"
+elif [ -e "$runtime_log_root" ]; then
+	[ -d "$runtime_log_root" ] ||
+		fail "runtime log root is not a directory: $runtime_log_root"
+else
+	mkdir "$runtime_log_root" ||
+		fail "cannot create runtime log root: $runtime_log_root"
+	chmod 0755 "$runtime_log_root" ||
+		fail "cannot set runtime log root mode: $runtime_log_root"
+fi
+
+line=0
+while read -r log_mode log_path extra ||
+    [ -n "$log_mode$log_path$extra" ]; do
+	line=$((line + 1))
+
+	case "$log_mode" in
+	''|\#*)
+		continue
+		;;
+	0644|0755)
+		;;
+	*)
+		fail "$manifest:$line: invalid mode: $log_mode"
+		;;
+	esac
+
+	[ -n "$log_path" ] || fail "$manifest:$line: missing path"
+	[ -z "$extra" ] || fail "$manifest:$line: unexpected extra field"
+
+	case "$log_path" in
+	sys/log/*)
+		;;
+	*)
+		fail "$manifest:$line: path is outside sys/log: $log_path"
+		;;
+	esac
+
+	case "$log_path" in
+	*[!A-Za-z0-9._/-]*)
+		fail "$manifest:$line: unsupported path character: $log_path"
+		;;
+	esac
+
+	case "/$log_path/" in
+	*/../*|*/./*|*//*)
+		fail "$manifest:$line: unsafe path: $log_path"
+		;;
+	esac
+
+	relative=${log_path#sys/log/}
+	case "$relative" in
+	*/*)
+		parent=${relative%/*}
+		;;
+	*)
+		parent=
+		;;
+	esac
+
+	directory=$runtime_log_root
+	while [ -n "$parent" ]; do
+		case "$parent" in
+		*/*)
+			component=${parent%%/*}
+			parent=${parent#*/}
+			;;
+		*)
+			component=$parent
+			parent=
+			;;
+		esac
+
+		directory=$directory/$component
+		if [ -L "$directory" ]; then
+			fail "$manifest:$line: parent must not be a symbolic link: $log_path"
+		elif [ -e "$directory" ]; then
+			[ -d "$directory" ] ||
+				fail "$manifest:$line: parent is not a directory: $log_path"
+		else
+			mkdir "$directory" ||
+				fail "$manifest:$line: cannot create parent: $log_path"
+			chmod 0755 "$directory" ||
+				fail "$manifest:$line: cannot set parent mode: $log_path"
+		fi
+	done
+
+	log_file=$root_fs/$log_path
+	if [ -L "$log_file" ]; then
+		fail "$manifest:$line: log must not be a symbolic link: $log_path"
+	elif [ -e "$log_file" ]; then
+		[ -f "$log_file" ] ||
+			fail "$manifest:$line: log is not a regular file: $log_path"
+	else
+		(umask 077; set -C; : > "$log_file") ||
+			fail "$manifest:$line: cannot create log: $log_path"
+		chmod "$log_mode" "$log_file" ||
+			fail "$manifest:$line: cannot set log mode: $log_path"
+	fi
+done < "$manifest"

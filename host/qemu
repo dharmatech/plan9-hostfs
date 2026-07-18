@@ -4,8 +4,7 @@ set -e
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 project_root=$(CDPATH= cd "$script_dir/.." && pwd)
 root_fs=$project_root/root-fs
-
-cd "$root_fs/boot"
+runtime_log_manifest=$script_dir/runtime-log-files
 
 pxe=pxeboot.raw
 case "$1" in
@@ -25,6 +24,9 @@ case "$#" in
 	echo 'usage: host/qemu [-pxenew|-mini]' >&2
 	exit 1
 esac
+
+"$script_dir/prepare-runtime-logs" "$runtime_log_manifest" "$root_fs"
+cd "$root_fs/boot"
 
 echo '# building u9fs' >&2
 make -C ../sys/src/cmd/unix/u9fs

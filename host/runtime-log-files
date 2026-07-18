@@ -1,0 +1,34 @@
+# Files required by legacy Plan 9 logging.
+# Format: mode root-fs-relative-path
+0755 sys/log/6in4
+0755 sys/log/aan
+0755 sys/log/auth
+0755 sys/log/cs
+0755 sys/log/fossil
+0755 sys/log/ftp
+0755 sys/log/httpd/clf
+0755 sys/log/httpd/log
+0755 sys/log/httpd/pathstat
+0755 sys/log/httpd/url
+0755 sys/log/imap4d
+0755 sys/log/ipboot
+0755 sys/log/ipconfig
+0755 sys/log/listen
+0755 sys/log/mail
+0755 sys/log/nfs
+0755 sys/log/nfsserver
+0755 sys/log/pop3
+0755 sys/log/portmapper
+0755 sys/log/ppp
+0755 sys/log/pptpd
+0755 sys/log/runq
+0755 sys/log/secstore
+0755 sys/log/smtp
+0755 sys/log/smtp.fail
+0755 sys/log/smtpd
+0755 sys/log/smtpd.mx
+0755 sys/log/ssh
+0755 sys/log/telnet
+0755 sys/log/timesync
+0644 sys/log/timesync.d/.gitempty
+0755 sys/log/v6routeradv
